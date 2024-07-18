@@ -20,12 +20,11 @@ namespace VPET.Evian.Sleep
     {
         Sleep vts;
 
-
         public winSetting(Sleep vts)
         {///前两行代码不可缺少
             InitializeComponent();
             this.vts = vts;   
-
+            Mul.Text = vts.variable.GetMul().ToString();
         }
 
         private void Window_Closed(object sender, EventArgs e)
@@ -34,6 +33,19 @@ namespace VPET.Evian.Sleep
         }
         private void Save_Click(object sender, RoutedEventArgs e)
         {
+            if(Mul.Text != "")
+            {
+                if(Math.Abs(Convert.ToInt32(Mul.Text)) <= 1)
+                {
+                    vts.variable.SetMul(1);
+                }
+                else
+                {
+                    vts.variable.SetMul(Math.Abs(Convert.ToInt32(Mul.Text)));
+                }
+                vts.MW.GameSavesData["Sleep"][(gint)"Multiple"] = vts.variable.GetMul();
+                vts.timepass = (0.0417 - vts.MW.GameSavesData.GameSave.Level / (1100 * 100)) * (vts.MW.GameSavesData.GameSave.StrengthMax / 100) / vts.variable.GetMul();
+            }
             Close();
         }
 

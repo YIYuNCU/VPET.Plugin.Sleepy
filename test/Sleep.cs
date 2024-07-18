@@ -22,6 +22,8 @@ using static VPet_Simulator.Core.ToolBar;
 using System.Windows.Media;
 using System.Reflection.Emit;
 using System.Security.AccessControl;
+using static VPet_Simulator.Core.GraphHelper;
+using System.Windows.Navigation;
 
 namespace VPET.Evian.Sleep
 {
@@ -37,17 +39,9 @@ namespace VPET.Evian.Sleep
         /// </summary>
         private double StrengthNow = new double();
         /// <summary>
-        /// 是否需要睡觉
+        /// 一桌宠日的时间是3的多少倍
         /// </summary>
-        private bool IsSleep = false;
-        /// <summary>
-        /// 是否显示过提示话语0
-        /// </summary>
-        private bool IsSay0 = false;
-        /// <summary>
-        /// 是否显示过提示话语1
-        /// </summary>
-        private bool IsSay1 = false;
+        private int multiple = 1;
         /// <summary>
         /// 设置体力上限
         /// </summary>
@@ -84,61 +78,83 @@ namespace VPET.Evian.Sleep
             return StrengthNow;
         }
         /// <summary>
-        /// 设置是否需要睡觉
+        /// 设置倍数
         /// </summary>
-        public void SetIS(bool value)
+        public void SetMul(int value)
         {
-            IsSleep = value;
+            multiple = value;
         }
         /// <summary>
-        /// 获取是否需要睡觉
+        /// 获取倍数
         /// </summary>
-        public bool GetIS()
+        public int GetMul()
         {
-            return IsSleep;
-        }
-        /// <summary>
-        /// 是否显示过提示话语0
-        /// </summary>
-        public void SetISy0(bool value)
-        {
-            IsSay0 = value;
-        }
-        /// <summary>
-        /// 是否显示过提示话语0
-        /// </summary>
-        public bool GetISy0()
-        {
-            return IsSay0;
-        }
-        /// <summary>
-        /// 是否显示过提示话语1
-        /// </summary>
-        public void SetISy1(bool value)
-        {
-            IsSay1 = value;
-        }
-        /// <summary>
-        /// 是否显示过提示话语1
-        /// </summary>
-        public bool GetISy1()
-        {
-            return IsSay1;
+            return multiple;
         }
     }
+    enum State
+    {
+        NSleepy = 0,
+        LSleepy = 1,
+        MSleepy = 2,
+        HSleepy = 3,
+        NSleep = 4,
+        Sleep = 5,
+        Sleepless = 6
+    };
     public class Sleep : MainPlugin
     {
-        Variable variable = new Variable();
+        public Variable variable = new Variable();
         TextBlock SleepyTextBlock;
         TextBlock SleepyChange;
         ProgressBar SleepyProgressBarMax;
-        private double timepass = new double();
+        public double timepass = new double();
         private string percent = new string("");
         private Main mmain;
         private double worlvalue = 0.0;
         private double lastsleepy = 0.0;
         public override string PluginName => "Sleep";
-
+        /// <summary>
+        /// 无困意值对话
+        /// </summary>
+        private List<ClickText> mnostext = new List<ClickText>();
+        /// <summary>
+        /// 低困意值对话
+        /// </summary>
+        private List<ClickText> mlstext = new List<ClickText>();
+        /// <summary>
+        /// 中困意值对话
+        /// </summary>
+        private List<ClickText> mmstext = new List<ClickText>();
+        /// <summary>
+        /// 高困意值对话
+        /// </summary>
+        private List<ClickText> mhstext = new List<ClickText>();
+        /// <summary>
+        /// 需要睡觉对话
+        /// </summary>
+        private List<ClickText> mnestext = new List<ClickText>();
+        /// <summary>
+        /// 梦话
+        /// </summary>
+        private List<ClickText> msltext = new List<ClickText>();
+        /// <summary>
+        /// 失眠抱怨
+        /// </summary>
+        private List<ClickText> msleepless = new List<ClickText>();
+        /// <summary>
+        /// 睡眠过多抱怨
+        /// </summary>
+        private List<ClickText> moversleep = new List<ClickText>();
+        private long TextNum = 1000;
+        private State nstate = State.Sleep;
+        private long sleeperr = -1;
+        private long nsleeperr = -1;
+        State mstate = State.Sleep;
+        /// <summary>
+        /// 文本文档
+        /// </summary>
+        public LpsDocument MTexts;
 #pragma warning disable CS8618 // 在退出构造函数时，不可为 null 的字段必须包含非 null 值。请考虑声明为可以为 null。
         public Sleep(IMainWindow mainwin) : base(mainwin)
 #pragma warning restore CS8618 // 在退出构造函数时，不可为 null 的字段必须包含非 null 值。请考虑声明为可以为 null。
@@ -151,17 +167,45 @@ namespace VPET.Evian.Sleep
         {
             variable.SetSM(MW.GameSavesData.GameSave.StrengthMax);
 
-            if (MW.GameSavesData["Sleep"].GetString("StrengthNow") != null)
+            if (!string.IsNullOrEmpty(MW.GameSavesData["Sleep"].GetString("StrengthNow")))
                 variable.SetNow(MW.GameSavesData["Sleep"][(gdbe)"StrengthNow"]);
             else
                 MW.GameSavesData["Sleep"][(gdbe)"StrengthNow"] = variable.GetSM();
+            if(!string.IsNullOrEmpty(MW.GameSavesData["Sleep"].GetString("Multiple")))
+            {
+                variable.SetMul(MW.GameSavesData["Sleep"][(gint)"Multiple"]);
+            }
+            else
+            {
+                MW.GameSavesData["Sleep"][(gint)"Multiple"] = variable.GetMul();
+            }
+            ///添加列表项
+            MenuItem modset = MW.Main.ToolBar.MenuMODConfig;
+            modset.Visibility = Visibility.Visible;
+            var menuItem = new MenuItem()
+            {
+                Header = "Sleep".Translate(),
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+            };
+            menuItem.Click += (s, e) => { Setting(); };
+            modset.Items.Add(menuItem);
+            //////读取文本文件
+            mlstext = MW.ClickTexts.FindAll(x => x.Working == "LowSleepyText");
+            mmstext = MW.ClickTexts.FindAll(x => x.Working == "MidSleepyText");
+            mhstext = MW.ClickTexts.FindAll(x => x.Working == "HighSleepyText");
+            msltext = MW.ClickTexts.FindAll(x => x.Working == "SleepText");
+            mnostext = MW.ClickTexts.FindAll(x => x.Working == "NoSleepyText");
+            mnestext = MW.ClickTexts.FindAll(x => x.Working == "NeedSleepText");
+            msleepless = MW.ClickTexts.FindAll(x => x.Working == "SleeplessText");
+            moversleep = MW.ClickTexts.FindAll(x => x.Working == "OverSleepText");
             Grid grid = MW.Main.ToolBar.gdPanel;
-            timepass = (0.0417-MW.GameSavesData.GameSave.Level / (1100* 100)) * MW.GameSavesData.GameSave.StrengthMax / 100 ;
+            timepass = (0.0417-MW.GameSavesData.GameSave.Level / (1100* 100)) * (MW.GameSavesData.GameSave.StrengthMax / 100)/ variable.GetMul() ;
             worlvalue = 0.256 * 0.0417 * 0.03;
             AddRow(grid);
             DispatcherTimer mUItimer = new DispatcherTimer();
             mUItimer.Interval = new TimeSpan(0, 0, 0, 5, 3);
             mUItimer.Tick += new EventHandler(MUItimer);
+            mUItimer.Tick += new EventHandler(MTexttimer);
             mUItimer.Start();
             lastsleepy = variable.GetNow();
             mmain = MW.Main;
@@ -174,7 +218,33 @@ namespace VPET.Evian.Sleep
             SleepyChangeUI(mmain);
             StrengthFunctionUI(mmain);
         }
+        private void MTexttimer(object? sender, EventArgs e)
+        {
+            if (TextNum % 20 == 0) 
+            {
+                sleeperr = -1;
+                nsleeperr = -1;
+            }
+            if(--TextNum <= 0 || mstate != nstate)
+            {
+                TextNum = 1000;
+                mstate = nstate;
+                /**********说话部分代码实现**************/
+                Random random = new Random(DateTime.Now.Nanosecond);
+                var rand = random.Next();
 
+                switch (mstate)
+                {
+                    case State.NSleepy: if (mnostext.Count == 0) return; MW.Main.Say(mnostext[rand % mnostext.Count].TranslateText); break;
+                    case State.LSleepy: if (mlstext.Count == 0) return; MW.Main.Say(mlstext[rand % mlstext.Count].TranslateText); break;
+                    case State.MSleepy: if (mmstext.Count == 0) return; MW.Main.Say(mmstext[rand % mmstext.Count].TranslateText); break;
+                    case State.HSleepy: if (mhstext.Count == 0) return; MW.Main.Say(mhstext[rand % mhstext.Count].TranslateText); break;
+                    case State.NSleep: if (mnestext.Count == 0) return; MW.Main.Say(mnestext[rand % mnestext.Count].TranslateText); break;
+                    case State.Sleep: if (msltext.Count == 0) return; MW.Main.Say(msltext[rand % msltext.Count].TranslateText); break;
+                };
+                /**********说话部分代码实现**************/
+            }
+        }
         public winSetting winSetting;
         public override void Setting()
         {
@@ -193,15 +263,15 @@ namespace VPET.Evian.Sleep
         /// </summary>
         private void SleepyChangeUI(Main main)
         {
-            var TimePass = (variable.GetNow() - lastsleepy)/variable.GetSM();
+            var TimePass = (lastsleepy - variable.GetNow())/variable.GetSM();
             lastsleepy = variable.GetNow();
-            TimePass = 20000 * TimePass;
+            TimePass = 10000 * TimePass;
             if (Math.Abs(TimePass) > 0.1)
-                SleepyChange.Text = $"{TimePass:f2}/kt";
+                SleepyChange.Text = $"{TimePass:f2}/ht";
             else if (Math.Abs(TimePass) > 0.01)
-                SleepyChange.Text = $"{TimePass:f3}/kt";
+                SleepyChange.Text = $"{TimePass:f3}/ht";
             else 
-                SleepyChange.Text = $"{TimePass:f4}/kt";
+                SleepyChange.Text = $"{TimePass:f4}/ht";
             var value = 1 - variable.GetNow() / variable.GetSM();
             value = 100 * value;
             SleepyProgressBarMax.Value = value;
@@ -293,9 +363,14 @@ namespace VPET.Evian.Sleep
                 StrengthChange(-(timepass * (1 + ransub) + SCWork * worlvalue));
             }
         }
+        /// <summary>
+        /// 困意值功能UI
+        /// </summary>
+        /// <param name="main"></param>
         private void StrengthFunctionUI(Main main)
         {
             StrengthFunction(0.05);
+            AutoSleep();
         }
         /// <summary>
         /// 改变困意值
@@ -318,12 +393,12 @@ namespace VPET.Evian.Sleep
         /// <returns></returns>
         private Brush GetForeground(double value)
         {
-            if (value <= 0.3)
+            if (value <= 0.5)
             { 
                 return MW.Main.FindResource("SuccessProgressBarForeground") as Brush;
             }
 
-            if (value <= 0.8)
+            if (value <= 0.85)
             {
                 return MW.Main.FindResource("WarningProgressBarForeground") as Brush;
             }
@@ -331,7 +406,7 @@ namespace VPET.Evian.Sleep
             return MW.Main.FindResource("DangerProgressBarForeground") as Brush;
         }
         /// <summary>
-        /// 困意值功能
+        /// 困意值奖惩数值
         /// </summary>
         /// <param name="TimePass"></param>
         private void StrengthFunction(double TimePass)
@@ -345,11 +420,12 @@ namespace VPET.Evian.Sleep
             {
                 if (variable.GetNow() / variable.GetSM() >= 0.7)
                 {
-                    if ((MW.GameSavesData.GameSave.Feeling + 2 * freedrop) < 100) 
+                    nstate = State.NSleepy;
+                    if ((MW.GameSavesData.GameSave.Feeling + 2 * freedrop) < 100)
                     {
                         MW.GameSavesData.GameSave.FeelingChange(2 * freedrop);
                     }
-                    if (MW.GameSavesData.GameSave.Health <= 2 * TimePass + MW.GameSavesData.GameSave.Health) 
+                    if (MW.GameSavesData.GameSave.Health <= 2 * TimePass + MW.GameSavesData.GameSave.Health)
                     {
                         MW.GameSavesData.GameSave.Health += Function.Rnd.Next(0, 2) * TimePass;
                     }
@@ -360,88 +436,55 @@ namespace VPET.Evian.Sleep
                 }
                 else if (variable.GetNow() / variable.GetSM() >= 0.5)
                 {
-                    variable.SetIS(false);
-                    variable.SetISy0(false);
-                    variable.SetISy1(false);
+                    nstate = State.LSleepy;
                 }
                 else if (variable.GetNow() / variable.GetSM() >= 0.4)
                 {
-                    if (variable.GetIS() == false)
-                    {
-                        MW.Main.Say("主人，我有点困了".Translate());
-                        variable.SetIS(true);
-                    }
+                    nstate = State.MSleepy;
                 }
                 else if (variable.GetNow() / variable.GetSM() >= 0.2)
                 {
-                    var feelingdouble = Function.Rnd.Next(0, 3) / 10.0;
-                    if ((MW.GameSavesData.GameSave.Feeling - feelingdouble * freedrop) > 0)
-                    {
-                        MW.GameSavesData.GameSave.FeelingChange(-(feelingdouble * freedrop));
-                    }
-                    if (variable.GetISy0() == false)
-                    {
-                        variable.SetIS(false);
-                        MW.Main.Say("主人，我睡一会".Translate());
-                        variable.SetISy0(true);
-                        variable.SetIS(true);
-                        if (MW.Main.State == Main.WorkingState.Work)
-                        {
-                            MW.Main.WorkTimer.Stop();
-                        }
-                        MW.Main.DisplaySleep(true);
-                        return;
-                    }                    
+                    nstate = State.HSleepy;
                 }
                 else if (variable.GetNow() / variable.GetSM() >= 0.1)
                 {
-                    var feelingdouble = Function.Rnd.Next(5, 15) / 10.0;
-                    if ((MW.GameSavesData.GameSave.Feeling - feelingdouble * freedrop) > 0)
+                    nstate = State.NSleep;
+                    var feelingdouble = 0.0;
+                    if (variable.GetNow() / variable.GetSM() >= 0.15)
                     {
-                        MW.GameSavesData.GameSave.FeelingChange(-(feelingdouble * freedrop));
-                    }
-                    if (MW.GameSavesData.GameSave.Health - 2 * TimePass > 0) 
-                    {
-                        MW.GameSavesData.GameSave.Health -= Function.Rnd.Next(0, 2) * TimePass;
-                    }
-                    if (variable.GetIS() == false)
-                    {
-                        MW.Main.Say("主人，我睡了".Translate());
-                        variable.SetIS(true);
-                        if (MW.Main.State == Main.WorkingState.Work)
+                        feelingdouble = Function.Rnd.Next(0, 3) / 10.0;
+                        if ((MW.GameSavesData.GameSave.Feeling - feelingdouble * freedrop) > 0)
                         {
-                            MW.Main.WorkTimer.Stop();
+                            MW.GameSavesData.GameSave.FeelingChange(-(feelingdouble * freedrop));
                         }
-                        MW.Main.DisplaySleep(true);
-                        return;
                     }
-                    if (variable.GetISy1() == false) 
+                    else
                     {
-                        MW.Main.Say("主人，我感觉有点心悸".Translate());
-                        variable.SetISy1(true);
+                        feelingdouble = Function.Rnd.Next(5, 15) / 10.0;
+                        if ((MW.GameSavesData.GameSave.Feeling - feelingdouble * freedrop) > 0)
+                        {
+                            MW.GameSavesData.GameSave.FeelingChange(-(feelingdouble * freedrop));
+                        }
+                        if (MW.GameSavesData.GameSave.Health - 2 * TimePass > 0)
+                        {
+                            MW.GameSavesData.GameSave.Health -= Function.Rnd.Next(0, 2) * TimePass;
+                        }
                     }
                 }
                 else
                 {
-                    if (MW.Main.State == Main.WorkingState.Work)
-                    {
-                        MW.Main.WorkTimer.Stop();
-                    }
-                    MW.Main.DisplaySleep(true);
+                    nstate = State.Sleep;
                 }
             }
             else
             {
-                if(variable.GetNow() / variable.GetSM() >= 0.95)
+                if (variable.GetNow() / variable.GetSM() >= 0.95)
                 {
-                    if (MW.Main.State == Main.WorkingState.Sleep)
-                    {
-                        MW.Main.State = Main.WorkingState.Nomal;
-                        MW.Main.DisplayToNomal();
-                    }
+                    nstate = State.NSleepy;
                 }
-                if (variable.GetNow() / variable.GetSM() >= 0.7)
+                else if (variable.GetNow() / variable.GetSM() >= 0.7)
                 {
+                    nstate = State.Sleep;
                     if ((MW.GameSavesData.GameSave.Feeling + 2 * freedrop) < 100)
                     {
                         MW.GameSavesData.GameSave.FeelingChange(2 * freedrop);
@@ -453,12 +496,80 @@ namespace VPET.Evian.Sleep
                 }
                 else if (variable.GetNow() / variable.GetSM() >= 0.5)
                 {
-                    variable.SetIS(false);
-                    variable.SetISy0(false);
-                    variable.SetISy1(false);
+                    nstate = State.Sleep;
                 }
             }
         }
+        private void AutoSleep()
+        {
+            if (variable.GetNow() / variable.GetSM() < -5)
+            {
+                variable.SetNow(0.05 * variable.GetSM());
+            }
+            else if (variable.GetNow() / variable.GetSM() > 105) 
+            {
+                variable.SetNow(0.80 * variable.GetSM());
+            }
+            if(nstate == State.NSleep)
+            {
+                if(MW.Main.State != Main.WorkingState.Work && MW.Main.State != Main.WorkingState.Sleep) 
+                {
+                    MW.Main.State = Main.WorkingState.Sleep;
+                    MW.Main.DisplaySleep(true);
+                    nstate = State.Sleep;
+                    sleeperr += 1;
+                }
+            }
+            else if(nstate == State.Sleep) 
+            {
+                if(MW.Main.State != Main.WorkingState.Sleep) 
+                {
+                    sleeperr += 1;
+                    if (MW.Main.State == Main.WorkingState.Work)
+                    {
+                        MW.Main.WorkTimer.Stop();
+                    }
+                    if(sleeperr >= 0.0115*MW.GameSavesData.GameSave.Level+ 10)
+                    {
+                        Random random = new Random(DateTime.Now.Nanosecond);
+                        var rand = random.Next();
+                        MW.Main.Say(msleepless[rand % msleepless.Count].Text);
+                        return;
+                    }
+                    MW.Main.State = Main.WorkingState.Sleep;
+                    MW.Main.DisplaySleep(true);
+                }
+            }
+            if(mstate == State.NSleepy)
+            {
+                if (MW.Main.State == Main.WorkingState.Sleep)
+                {
+                    nsleeperr += 1;
+                    Random random = new Random(DateTime.Now.Nanosecond);
+                    var rand = random.Next();
+                    if(nsleeperr > 0) MW.Main.Say(moversleep[rand % moversleep.Count].Text);
+                    MW.Main.State = Main.WorkingState.Nomal;
+                    MW.Main.DisplaySleep(false);
+                }
+            }
+            else if(mstate == State.LSleepy) 
+            {
+                if (MW.Main.State == Main.WorkingState.Sleep)
+                {
+                    Random random = new Random(DateTime.Now.Nanosecond);
+                    var rand = random.Next(1000);
+                    if (rand >= 900)
+                    {
+                        nsleeperr += 1;
+                        if (nsleeperr > 0) MW.Main.Say(moversleep[rand % moversleep.Count].Text);
+                        MW.Main.State = Main.WorkingState.Nomal;
+                        MW.Main.DisplaySleep(false);
+                    }
+                }
+            }
+        }
+
+
     }
 }
 
