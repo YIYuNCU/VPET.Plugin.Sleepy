@@ -24,6 +24,7 @@ using System.Reflection.Emit;
 using System.Security.AccessControl;
 using static VPet_Simulator.Core.GraphHelper;
 using System.Windows.Navigation;
+using System.Windows.Media.Converters;
 
 namespace VPET.Evian.Sleep
 {
@@ -146,7 +147,9 @@ namespace VPET.Evian.Sleep
         /// 睡眠过多抱怨
         /// </summary>
         private List<ClickText> moversleep = new List<ClickText>();
-        private long TextNum = 1000;
+        private long TextNum = 300;
+        private long ERRNUM = 200;
+        private bool SleepErrState = false;
         private State nstate = State.Sleep;
         private long sleeperr = -1;
         private long nsleeperr = -1;
@@ -171,7 +174,11 @@ namespace VPET.Evian.Sleep
                 variable.SetNow(MW.GameSavesData["Sleep"][(gdbe)"StrengthNow"]);
             else
                 MW.GameSavesData["Sleep"][(gdbe)"StrengthNow"] = variable.GetSM();
-            if(!string.IsNullOrEmpty(MW.GameSavesData["Sleep"].GetString("Multiple")))
+            if (!string.IsNullOrEmpty(MW.GameSavesData["Sleep"].GetString("SleepErrState")))
+                SleepErrState = MW.GameSavesData["Sleep"][(gbol)"SleepErrState"];
+            else
+                SleepErrState = false;
+            if (!string.IsNullOrEmpty(MW.GameSavesData["Sleep"].GetString("Multiple")))
             {
                 variable.SetMul(MW.GameSavesData["Sleep"][(gint)"Multiple"]);
             }
@@ -220,10 +227,16 @@ namespace VPET.Evian.Sleep
         }
         private void MTexttimer(object? sender, EventArgs e)
         {
-            if (TextNum % 20 == 0) 
+            if (--ERRNUM <= 0) 
             {
                 sleeperr = -1;
                 nsleeperr = -1;
+                SleepErrState = false;
+                ERRNUM = 200;
+            }
+            if(SleepErrState == true)
+            {
+                return;
             }
             if(--TextNum <= 0 || mstate != nstate)
             {
@@ -510,14 +523,38 @@ namespace VPET.Evian.Sleep
             {
                 variable.SetNow(0.80 * variable.GetSM());
             }
+            if(SleepErrState == true && MW.Main.State == Main.WorkingState.Sleep) 
+            {
+                Random random = new Random(DateTime.Now.Nanosecond);
+                var rand = random.Next();
+                MW.Main.Say(msleepless[rand % msleepless.Count].Text);
+                MW.Main.State = Main.WorkingState.Nomal;
+                MW.Main.DisplayCEndtoNomal("sleep");
+                return;
+            }
+            else if(SleepErrState == true)
+            {
+                return;
+            }
             if(nstate == State.NSleep)
             {
                 if(MW.Main.State != Main.WorkingState.Work && MW.Main.State != Main.WorkingState.Sleep) 
                 {
+                    sleeperr += 1;
+                    if (sleeperr >= 3)
+                    {
+                        if(SleepErrState == false)
+                        {
+                            Random random = new Random(DateTime.Now.Nanosecond);
+                            var rand = random.Next();
+                            MW.Main.Say(msleepless[rand % msleepless.Count].Text);
+                            SleepErrState = true;
+                        }
+                        return;
+                    }
                     MW.Main.State = Main.WorkingState.Sleep;
                     MW.Main.DisplaySleep(true);
                     nstate = State.Sleep;
-                    sleeperr += 1;
                 }
             }
             else if(nstate == State.Sleep) 
@@ -529,11 +566,15 @@ namespace VPET.Evian.Sleep
                     {
                         MW.Main.WorkTimer.Stop();
                     }
-                    if(sleeperr >= 0.0115*MW.GameSavesData.GameSave.Level+ 10)
+                    if (sleeperr >= 3)
                     {
-                        Random random = new Random(DateTime.Now.Nanosecond);
-                        var rand = random.Next();
-                        MW.Main.Say(msleepless[rand % msleepless.Count].Text);
+                        if (SleepErrState == false)
+                        {
+                            Random random = new Random(DateTime.Now.Nanosecond);
+                            var rand = random.Next();
+                            MW.Main.Say(msleepless[rand % msleepless.Count].Text);
+                            SleepErrState = true;
+                        }
                         return;
                     }
                     MW.Main.State = Main.WorkingState.Sleep;
@@ -547,9 +588,11 @@ namespace VPET.Evian.Sleep
                     nsleeperr += 1;
                     Random random = new Random(DateTime.Now.Nanosecond);
                     var rand = random.Next();
-                    if(nsleeperr > 0) MW.Main.Say(moversleep[rand % moversleep.Count].Text);
                     MW.Main.State = Main.WorkingState.Nomal;
-                    MW.Main.DisplaySleep(false);
+                    MW.Main.DisplayCEndtoNomal("sleep");
+                    nstate = State.NSleepy;
+                    if (moversleep.Count <= 0) return;
+                    if(nsleeperr > 0) MW.Main.Say(moversleep[rand % moversleep.Count].Text);
                 }
             }
             else if(mstate == State.LSleepy) 
@@ -563,7 +606,8 @@ namespace VPET.Evian.Sleep
                         nsleeperr += 1;
                         if (nsleeperr > 0) MW.Main.Say(moversleep[rand % moversleep.Count].Text);
                         MW.Main.State = Main.WorkingState.Nomal;
-                        MW.Main.DisplaySleep(false);
+                        MW.Main.DisplayCEndtoNomal("sleep");
+                        nstate = State.LSleepy;
                     }
                 }
             }
