@@ -1,6 +1,7 @@
 ﻿using LinePutScript;
 using LinePutScript.Localization.WPF;
 using Panuon.WPF.UI;
+using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -142,6 +143,9 @@ namespace VPET.Evian.Sleep
         public bool Enable = true;
         private double Value = 5; 
         public DispatcherTimer mUItimer;
+        private double FoodChange = 0;
+        private bool FoodErr = false;
+        private bool FoodErrMax = false;
         /// <summary>
         /// 文本文档
         /// </summary>
@@ -236,9 +240,25 @@ namespace VPET.Evian.Sleep
             variable.SetNow((1 - Value / 100) * variable.GetSM());
             LastValue = Value;
             mmain = MW.Main;
+            MW.Event_TakeItem += MTakeItemEvent;
             ///base.LoadPlugin();
         }
-
+        public void MTakeItemEvent(Food food)
+        {
+            if (food == null)
+            {
+                return;
+            }
+            if (food.Type == Food.FoodType.Functional)
+            {
+                var Strength = food.Strength;
+                while (Strength > 8.5)
+                {
+                    Strength /= 10;
+                }
+                FoodChange += Strength;
+            }
+        }
         private void MUItimer(object? sender, EventArgs e)
         {
             if(Mode)
@@ -251,6 +271,42 @@ namespace VPET.Evian.Sleep
             }
             SleepyChangeUI(mmain);
             StrengthFunctionUI(mmain);
+            Punish();
+        }
+        private void Punish()
+        {
+            if (FoodChange < 0) 
+            {
+                FoodChange = 0;
+            }
+            if(FoodChange > 50)
+            {
+                FoodChange -= 1;
+                MW.GameSavesData.GameSave.Health -= 0.1;
+                if(!FoodErr)
+                {
+                    FoodErr = true;
+                    MW.Main.SayRnd("感觉有点不舒服，是不是摄入太多功能性产品了".Translate());
+                }
+            }
+            if(FoodChange > 100)
+            {
+                MW.GameSavesData.GameSave.Health -= 2;
+                MW.GameSavesData.GameSave.StrengthFood -= 0.06 * MW.GameSavesData.GameSave.StrengthMax;
+                MW.GameSavesData.GameSave.StrengthDrink -= 0.06 * MW.GameSavesData.GameSave.StrengthMax;
+                FoodChange -= 20;
+                MW.GameSavesData.GameSave.Mode = IGameSave.ModeType.PoorCondition;
+                if (!FoodErrMax)
+                {
+                    FoodErrMax = true;
+                    MW.Main.Say("呕...感觉好难受...下次再也不吃这么多功能性产品了".Translate(), "squat");
+                }
+            }
+            if(FoodChange < 10)
+            {
+                FoodErr = false;
+                FoodErrMax = false;
+            }
         }
         private void MTexttimer(object? sender, EventArgs e)
         {
@@ -390,14 +446,24 @@ namespace VPET.Evian.Sleep
             else if (MW.Main.State == Main.WorkingState.Work && MW.Main.NowWork.Type != GraphHelper.Work.WorkType.Play)
             {
                 var SCWork = 1.0 * (Math.Abs(MW.Main.NowWork.Feeling) + MW.Main.NowWork.StrengthDrink + MW.Main.NowWork.StrengthFood) / 3;
-                SCWork *= 5 / (36 * SleepHour) / 100;
-                delnum = SCWork + 5 / (36 * SleepHour);
+                SCWork *= 5 / (36 * AwakeHour) / 600;
+                delnum = SCWork + 5 / (36 * AwakeHour);
             }
             else if (MW.Main.State == Main.WorkingState.Work && MW.Main.NowWork.Type == GraphHelper.Work.WorkType.Play)
             {
                 var SCWork = 1.0 * (-Math.Abs(MW.Main.NowWork.Feeling) + MW.Main.NowWork.StrengthDrink + MW.Main.NowWork.StrengthFood) / 3;
-                SCWork *= 5 / (36 * SleepHour) / 100;
-                delnum = SCWork + 5 / (36 * SleepHour);
+                SCWork *= 5 / (36 * AwakeHour) / 600;
+                delnum = SCWork + 5 / (36 * AwakeHour);
+            }
+            if (MW.Main.State == Main.WorkingState.Sleep)
+            {
+                delnum += FoodChange / 160 / SleepHour;
+                FoodChange -= FoodChange / 480 / SleepHour;
+            }
+            else
+            {
+                delnum -= FoodChange / 32 /AwakeHour;
+                FoodChange -= FoodChange / 96 /AwakeHour;
             }
             Value += delnum;
             if(Value < 0)
@@ -436,6 +502,17 @@ namespace VPET.Evian.Sleep
             {
                 var SCWork = 1.0 * (-Math.Abs(MW.Main.NowWork.Feeling) + MW.Main.NowWork.StrengthDrink + MW.Main.NowWork.StrengthFood) / 3;
                 StrengthChange(-(timepass * (1 + ransub) + SCWork * worlvalue));
+            }
+            var delnum = 0.0;
+            if (MW.Main.State == Main.WorkingState.Sleep)
+            {
+                StrengthChange(-FoodChange / 16 / 5 / variable.GetMul());
+                FoodChange -= FoodChange / 80 / 5 / variable.GetMul();
+            }
+            else
+            {
+                StrengthChange((FoodChange / 16) / variable.GetMul());
+                FoodChange -= (FoodChange / 80) / variable.GetMul();
             }
             Value = 100 - variable.GetNow() / variable.GetSM() * 100;
             MW.GameSavesData["Sleep"][(gdbe)"Value"] = Value;
